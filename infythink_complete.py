@@ -5,8 +5,8 @@
 # openai → optional external API for heavy reasoning or tool execution.
 
 from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.embeddings import LlamaCppEmbeddings
+#from langchain.embeddings import HuggingFaceEmbeddings
+#from langchain.embeddings import LlamaCppEmbeddings
 import subprocess
 import random
 from llama_cpp import Llama
@@ -65,23 +65,56 @@ Critique:
 
     return run_llm(prompt)
 
+# -----------------------------
+# AGENT 3 — REWARD MODEL
+# -----------------------------
+def reward(reasoning, critique):
+    score=100
+    penalties = [
+        "mistake",
+        "contradiction",
+        "incorrect",
+        "missing",
+        "weak"
+    ]
+    for p in penalties:
+        score -= critique.lower().count(p) * 10
+    
+    score += random.randint(-5,5)
+    return max(score,0)
 
 
 # Adding Vector Store:
 # Embeddings Model
 #embeddings = LlamaCppEmbeddings(model_path=MODEL_PATH)
 # Use tiny SBERT embeddings (1-2 GB RAM)
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+#embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 # Vector DB
 #vector_memeory = FAISS(embedding_function=embeddings, index=None)
-vector_memory = FAISS.from_texts([], embedding=embeddings)
+#vector_memory = FAISS.from_texts([], embedding=embeddings)
 # Optionally, remove dummy vector if you don't want it
-vector_memory.delete(ids=[0])
+#vector_memory.delete(ids=[0])
+
+# Simple text memory store
+memory_store = []
+
+def store_memory(text: str):
+    memory_store.append(text)
+
+def retrieve_memory(query: str, top_k: int = 3):
+    # Count keyword matches in stored summaries
+    scored = [(i, t.count(query)) for i, t in enumerate(memory_store)]
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return [memory_store[i] for i, score in scored[:top_k] if score > 0]
 
 # Planner
 def planner(question):
-    prompt = run_llm(prompt)
+    prompt = f"""
+Break this task into subproblems that can be solved iteratively.
+Question: {question}
+"""
+    plan = run_llm(prompt)
     return plan.split("\n")
 
 def monte_carlo_explore(subproblem, iteration=3):
@@ -98,8 +131,10 @@ def monte_carlo_explore(subproblem, iteration=3):
 # Critic & Self-Reflection
 def critique_with_memory(reasoning):
     # Retrieve relevant past memory
-    relevant = vector_memeory.similarity_search(reasoning, k=3)
-    context = "\n".join([r.page_content for r in relevant])
+    #relevant = vector_memeory.similarity_search(reasoning, k=3)
+    #context = "\n".join([r.page_content for r in relevant])
+    relevant = retrieve_memory(reasoning)
+    context = "\n".join(relevant)
     prompt = f"""
 Critique the reasoning below using past memory if relevant.
 Reasoning: {reasoning}
@@ -121,7 +156,8 @@ Improve and rewrite the reasoning.
     refined = run_llm(prompt)
     
     # Compress and store in vector DB
-    vector_memory.add_texts([refined])
+    #vector_memory.add_texts([refined])
+    store_memory(refined)
     
     return refined
 
